@@ -1,0 +1,22 @@
+{
+    "frame_size": 84,
+    "skip_frames": 4,
+    "stack_frames": 4,
+    "replay_buffer_size": 1000000,
+    "learning_rate": 0.00025,
+    "batch_size": 32,
+    "gamma": 0.99,
+    "device": "cuda",
+    "steps_before_training": 200000,
+    "steps_per_online_update": 4,
+    "steps_per_target_update": 32000,
+    "total_episodes": 40000,
+    "episodes_per_log": 400,
+    "episodes_per_save": 5000,
+    "output_dir": "models/dqn",
+    "seed": 5500,
+
+    "epsilon_start": 1,
+    "epsilon_end": 0.1,
+    "epsilon_decay": 0.99999975
+}
