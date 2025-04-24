@@ -35,33 +35,47 @@ class DQNNetwork(nn.Module):
         return self.net(x)
 
 class DQN:
-    def __init__(self, state_shape, num_actions, config):
-        self.online_network = DQNNetwork(state_shape, num_actions)
-
-        self.target_network = DQNNetwork(state_shape, num_actions)
-        for param in self.target_network.parameters():
-            param.requires_grad = False
-        # shallow copy, will not have required_grad=True
-        self.target_network.load_state_dict(self.online_network.state_dict())
-
-        self.optimizer = optim.Adam(self.online_network.parameters(), config["learning_rate"])
-        self.criterion = nn.MSELoss()
-
-        self.replay_buffer = ReplayBuffer(config["replay_buffer_size"])
-
+    def __init__(self, state_shape, num_actions, config, checkpoint_dir=None):
         self.num_actions = num_actions
         self.batch_size = config["batch_size"]
         self.device = config["device"]
         self.gamma = config["gamma"]
+        self.is_training = False
 
         self.epsilon_start = config["epsilon_start"]
         self.epsilon_end = config["epsilon_end"]
         self.epsilon_decay = config["epsilon_decay"]
         self.epsilon = self.epsilon_start
 
-        self.online_network = self.online_network.to(self.device)
-        self.target_network = self.target_network.to(self.device)
+        self.online_network = DQNNetwork(state_shape, num_actions)
+
+        self.target_network = DQNNetwork(state_shape, num_actions)
+        for param in self.target_network.parameters():
+            param.requires_grad = False
+
+        if checkpoint_dir is None:
+            # shallow copy, will not have required_grad=True
+            self.target_network.load_state_dict(self.online_network.state_dict())
+        else:
+            self.online_network.load_state_dict(
+                torch.load(checkpoint_dir / "model.pt", weights_only=False, map_location=self.device)
+            )
+
+            training_state = torch.load(checkpoint_dir / "training_state.pt", weights_only=False)
+            self.target_network.load_state_dict(training_state["target_network"])
+            self.epsilon = training_state["epsilon"]
+
+        self.online_network.to(self.device)
+        self.target_network.to(self.device)
         self.target_network.eval()
+
+        self.optimizer = optim.Adam(self.online_network.parameters(), config["learning_rate"])
+        if checkpoint_dir is not None:
+            self.optimizer.load_state_dict(training_state["optimizer"])
+
+        self.criterion = nn.MSELoss()
+
+        self.replay_buffer = ReplayBuffer(config["replay_buffer_size"])
 
     @torch.no_grad()
     def get_action(self, state):
@@ -74,8 +88,12 @@ class DQN:
             state = torch.FloatTensor(np.asarray(state)).unsqueeze(0).to(self.device)
             action = torch.argmax(self.online_network(state)).item()
 
-        self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_end)
+        if self.is_training:
+            self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_end)
         return action
+
+    def start_training(self):
+        self.is_training = True
 
     def update_target(self):
         self.target_network.load_state_dict(self.online_network.state_dict())
@@ -107,12 +125,12 @@ class DQN:
         pass
 
     def save(self, output_dir):
-        self.online_network = self.online_network.cpu()
-        torch.save(self.online_network.state_dict(), output_dir / f"model.pt")
-        self.online_network = self.online_network.to(self.device)
+        self.online_network.cpu()
+        torch.save(self.online_network.state_dict(), output_dir / "model.pt")
+        self.online_network.to(self.device)
 
         torch.save({
             "target_network": self.target_network.state_dict(),
             "optimizer": self.optimizer.state_dict(),
-            "replay_buffer": self.replay_buffer.buffer,
-        }, output_dir / f"training_state.pt")
+            "epsilon": self.epsilon
+        }, output_dir / "training_state.pt")

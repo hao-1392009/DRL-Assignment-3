@@ -43,6 +43,7 @@ def get_arg_parser():
     parser.add_argument("--episodes_per_save", type=int)
     parser.add_argument("--output_dir")
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--resume_from_checkpoint", type=int)
 
     parser.add_argument("--epsilon_start", type=float, help="for epsilon-greedy")
     parser.add_argument("--epsilon_end", type=float, help="for epsilon-greedy")
@@ -88,7 +89,7 @@ if __name__ == "__main__":
     env = JoypadSpace(env, COMPLEX_MOVEMENT)
     env = preprocess_env(env, config["frame_size"], config["skip_frames"], config["stack_frames"])
 
-    agent = DQN((config["stack_frames"], *config["frame_size"]), env.action_space.n, config)
+    util.fix_random_seed(config["seed"], env)
 
     total_episodes = config["total_episodes"]
     steps_before_training = config["steps_before_training"]
@@ -96,20 +97,48 @@ if __name__ == "__main__":
     steps_per_target_update = config["steps_per_target_update"]
     episodes_per_log = config["episodes_per_log"]
     episodes_per_save = config["episodes_per_save"]
+    resume_from_checkpoint = config["resume_from_checkpoint"]
 
-    util.fix_random_seed(config["seed"], env)
+    if resume_from_checkpoint:
+        checkpoint_dir = output_dir / f"checkpoint-{resume_from_checkpoint}"
+        logger.info(f"Loading checkpoint from {checkpoint_dir}")
+
+        agent = DQN((config["stack_frames"], *config["frame_size"]), env.action_space.n, config,
+                    checkpoint_dir)
+    else:
+        agent = DQN((config["stack_frames"], *config["frame_size"]), env.action_space.n, config)
+        resume_from_checkpoint = 0
+
+
+    logger.info(f"Start collecting {steps_before_training} transitions")
+    state = env.reset()
+    for _ in range(steps_before_training):
+        action = agent.get_action(state)
+        next_state, reward, done, info = env.step(action)
+
+        if len(agent.replay_buffer.buffer) == agent.replay_buffer.buffer.maxlen // 2:
+            logger.debug("replay buffer half full")
+        elif len(agent.replay_buffer.buffer) == agent.replay_buffer.buffer.maxlen - 1:
+            logger.debug("replay buffer full")
+        agent.replay_buffer.add(state, action, reward, next_state, done)
+
+        state = next_state
+
+        if done:
+            state = env.reset()
+
 
     reward_history = []
     avg_reward_history = []
     avg_reward_history_file = output_dir / "avg_reward_history.txt"
 
     step_counter = 0
-    start_training = False
 
     lst_episode_steps = []
 
     logger.info("***** Start training *****")
-    for episode in range(1, total_episodes + 1):
+    agent.start_training()
+    for episode in range(resume_from_checkpoint + 1, resume_from_checkpoint + total_episodes + 1):
         state = env.reset()
         done = False
         total_reward = 0
@@ -128,14 +157,9 @@ if __name__ == "__main__":
             agent.replay_buffer.add(state, action, reward, next_state, done)
 
             step_counter += 1
-            if not start_training and step_counter >= steps_before_training:
-                start_training = True
-                step_counter = 0
-                logger.info("Start updating networks")
-
-            if start_training and step_counter % steps_per_online_update == 0:
+            if step_counter % steps_per_online_update == 0:
                 agent.update_online()
-            if start_training and step_counter % steps_per_target_update == 0:
+            if step_counter % steps_per_target_update == 0:
                 agent.update_target()
 
             state = next_state
@@ -166,6 +190,10 @@ if __name__ == "__main__":
                 for epi, avg_reward in avg_reward_history:
                     file.write(f"{epi} {avg_reward}\n")
             avg_reward_history = []
+
+            logger.info(f"Successfully saved checkpoint to {checkpoint_dir}")
+
+    logger.info(f"Finish training after {step_counter} steps")
 
 
     with open(avg_reward_history_file, "r") as file:
