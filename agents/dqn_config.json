@@ -11,7 +11,7 @@
     "steps_per_online_update": 4,
     "steps_per_target_update": 32000,
     "total_episodes": 40000,
-    "episodes_per_log": 400,
+    "episodes_per_log": 100,
     "episodes_per_save": 5000,
     "output_dir": "models/dqn",
     "seed": 5500,

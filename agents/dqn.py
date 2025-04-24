@@ -66,13 +66,16 @@ class DQN:
     @torch.no_grad()
     def get_action(self, state):
         if random.random() < self.epsilon:
-            return random.randint(0, self.num_actions - 1)
+            action = random.randint(0, self.num_actions - 1)
         else:
             self.online_network.eval()
 
             # cast gym.wrappers.LazyFrames to np.ndarray
             state = torch.FloatTensor(np.asarray(state)).unsqueeze(0).to(self.device)
-            return torch.argmax(self.online_network(state)).item()
+            action = torch.argmax(self.online_network(state)).item()
+
+        self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_end)
+        return action
 
     def update_target(self):
         self.target_network.load_state_dict(self.online_network.state_dict())
@@ -100,7 +103,8 @@ class DQN:
         self.optimizer.step()
 
     def on_episode_end(self, episode):
-        self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_end)
+        # self.epsilon = max(self.epsilon * self.epsilon_decay, self.epsilon_end)
+        pass
 
     def save(self, output_dir):
         self.online_network = self.online_network.cpu()
