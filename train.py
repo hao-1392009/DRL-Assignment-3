@@ -177,7 +177,7 @@ if __name__ == "__main__":
         if episode % episodes_per_log == 0:
             avg_reward = np.mean(reward_history)
             logger.info(f"Episode {episode}, Average Reward: {avg_reward}")
-            logger.debug(f"epsilon: {agent.epsilon}, avg steps per episode: {np.mean(lst_episode_steps)}")
+            logger.debug(f"avg steps per episode: {np.mean(lst_episode_steps)}")
             lst_episode_steps = []
 
             avg_reward_history.append((episode, avg_reward))
