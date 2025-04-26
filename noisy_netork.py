@@ -13,8 +13,10 @@ class NoisyLinear(nn.Module):
         self.b_mu = nn.Parameter(torch.rand(out_features) * 2*c - c)
         self.b_sigma = nn.Parameter(torch.full((out_features,), sigma0 * c))
 
-        self.w_epsilon = None
-        self.b_epsilon = None
+        # These will also be moved when NoisyLinear.to(device) is called.
+        # But they won't appear in NoisyLinear.parameters().
+        self.register_buffer("w_epsilon", torch.empty(out_features, in_features))
+        self.register_buffer("b_epsilon", torch.empty(out_features))
 
         self.in_features = in_features
         self.out_features = out_features
@@ -27,8 +29,12 @@ class NoisyLinear(nn.Module):
         )
 
     def resample_noise(self):
-        self.b_epsilon = self._f(torch.randn(self.out_features))
-        self.w_epsilon = torch.outer(self.b_epsilon, self._f(torch.randn(self.in_features)))
+        device = self.w_epsilon.device
+
+        self.b_epsilon = self._f(torch.randn(self.out_features, device=device))
+        self.w_epsilon = torch.outer(
+            self.b_epsilon, self._f(torch.randn(self.in_features, device=device))
+        )
 
     def _f(self, x: torch.Tensor):
         return x.sign() * x.abs().sqrt()
