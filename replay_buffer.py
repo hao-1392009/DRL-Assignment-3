@@ -70,3 +70,45 @@ class PrioritizedReplayBuffer:
 
     def __len__(self):
         return self.size
+
+
+class NStepBuffer:
+    def __init__(self, n_step, gamma, buffer):
+        self.n_step = n_step
+        self.buffer = buffer
+
+        if self.n_step > 1:
+            self.gamma = gamma
+            self.n_buffer = collections.deque(maxlen=self.n_step)
+
+    def add(self, state, action, reward, next_state, done):
+        if self.n_step == 1:
+            self.buffer.add(state, action, reward, next_state, done)
+            return
+
+        self.n_buffer.append((state, action, reward, next_state, done))
+
+        if done:
+            transitions = []
+
+            n_reward = 0
+            for transition in reversed(self.n_buffer):
+                state, action, reward = transition[:3]
+                n_reward = reward + self.gamma * n_reward
+                transitions.append((state, action, n_reward, next_state, done))
+
+            for transition in reversed(transitions):
+                self.buffer.add(*transition)
+
+            self.n_buffer.clear()
+            return
+
+        if len(self.n_buffer) < self.n_step:
+            return
+
+        n_reward = 0
+        for transition in reversed(self.n_buffer):
+            state, action, reward = transition[:3]
+            n_reward = reward + self.gamma * n_reward
+
+        self.buffer.add(state, action, n_reward, next_state, done)

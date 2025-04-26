@@ -139,7 +139,7 @@ class DPDN(Agent):
 
         self.target_network.resample_noise()
         target_next_qs = self.target_network(next_states)[range(batch_size), online_next_actions]
-        targets = rewards + (~dones) * self.gamma * target_next_qs
+        targets = rewards + (~dones) * self.gamma**self.n_step_td * target_next_qs
 
         self.online_network.train()
         self.online_network.resample_noise()

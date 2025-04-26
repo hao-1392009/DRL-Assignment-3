@@ -6,10 +6,12 @@ class Agent(abc.ABC):
         self.batch_size = config["batch_size"]
         self.device = config["device"]
         self.gamma = config["gamma"]
+        self.n_step_td = config["n_step_td"]
         self.is_training = False
 
         self.target_network = None
         self.online_network = None
+        self.replay_buffer = None
 
     def start_training(self):
         self.is_training = True

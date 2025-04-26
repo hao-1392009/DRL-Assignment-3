@@ -12,6 +12,7 @@ import argparse
 
 from env_preprocessor import preprocess_env
 import util
+from replay_buffer import NStepBuffer
 from agents.dpdn import DPDN
 
 logger = logging.getLogger(__name__)  # set up a name so that matplotlib does not pollute the log
@@ -44,6 +45,7 @@ def get_arg_parser():
     parser.add_argument("--output_dir")
     parser.add_argument("--seed", type=int)
     parser.add_argument("--resume_from_checkpoint", type=int, default=0)
+    parser.add_argument("--n_step_td", type=int, default=1)
 
     parser.add_argument("--epsilon_start", type=float, help="for epsilon-greedy")
     parser.add_argument("--epsilon_end", type=float, help="for epsilon-greedy")
@@ -109,6 +111,8 @@ if __name__ == "__main__":
     else:
         agent = DPDN((config["stack_frames"], *config["frame_size"]), env.action_space.n, config)
 
+    n_step_buffer = NStepBuffer(config["n_step_td"], config["gamma"], agent.replay_buffer)
+
 
     logger.info(f"Start collecting {steps_before_training} transitions")
     state = env.reset()
@@ -120,7 +124,7 @@ if __name__ == "__main__":
             logger.debug("replay buffer half full")
         elif len(agent.replay_buffer) == agent.replay_buffer.capacity - 1:
             logger.debug("replay buffer full")
-        agent.replay_buffer.add(state, action, reward, next_state, done)
+        n_step_buffer.add(state, action, reward, next_state, done)
 
         state = next_state
 
@@ -154,7 +158,7 @@ if __name__ == "__main__":
                 logger.debug("replay buffer half full")
             elif len(agent.replay_buffer) == agent.replay_buffer.capacity - 1:
                 logger.debug("replay buffer full")
-            agent.replay_buffer.add(state, action, reward, next_state, done)
+            n_step_buffer.add(state, action, reward, next_state, done)
 
             step_counter += 1
             if step_counter % steps_per_online_update == 0:

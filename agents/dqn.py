@@ -102,7 +102,7 @@ class DQN(Agent):
         dones = torch.BoolTensor(dones).to(self.device)
 
         max_next_qs = torch.max(self.target_network(next_states), dim=-1).values
-        targets = rewards + (~dones) * self.gamma * max_next_qs
+        targets = rewards + (~dones) * self.gamma**self.n_step_td * max_next_qs
 
         self.online_network.train()
         predictions = self.online_network(states)[range(states.shape[0]), actions]
