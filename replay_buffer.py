@@ -8,14 +8,17 @@ from segment_tree import SumSegmentTree, MinSegmentTree
 class ReplayBuffer:
     def __init__(self, capacity):
         self.buffer =collections.deque(maxlen=capacity)
+        self.capacity = capacity
 
     def add(self, state, action, reward, next_state, done):
-        self.buffer.append((state, action, reward, next_state, done))
         # np.uint8 is deprecated
-        # self.buffer.append((state, np.int8(action), reward, next_state, np.bool8(done)))
+        self.buffer.append((state, np.int8(action), reward, next_state, done))
 
     def sample(self, batch_size):
         return random.sample(self.buffer, min(batch_size, len(self.buffer)))
+
+    def __len__(self):
+        return len(self.buffer)
 
 
 class PrioritizedReplayBuffer:
@@ -33,7 +36,7 @@ class PrioritizedReplayBuffer:
 
     def add(self, state, action, reward, next_state, done):
         # np.uint8 is deprecated
-        self.buffer[self.replace_index] = (state, np.int8(action), reward, next_state, np.bool8(done))
+        self.buffer[self.replace_index] = (state, np.int8(action), reward, next_state, done)
         self.sum_tree[self.replace_index] = self.max_priority ** self.alpha
         self.min_tree[self.replace_index] = self.max_priority ** self.alpha
 
@@ -64,3 +67,6 @@ class PrioritizedReplayBuffer:
             self.min_tree[index] = priority ** self.alpha
 
             self.max_priority = max(self.max_priority, priority)
+
+    def __len__(self):
+        return self.size

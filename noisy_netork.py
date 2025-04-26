@@ -11,7 +11,7 @@ class NoisyLinear(nn.Module):
         self.w_sigma = nn.Parameter(torch.full((out_features, in_features), sigma0 * c))
 
         self.b_mu = nn.Parameter(torch.rand(out_features) * 2*c - c)
-        self.b_sigma = nn.Parameter(torch.full(out_features, sigma0 * c))
+        self.b_sigma = nn.Parameter(torch.full((out_features,), sigma0 * c))
 
         self.w_epsilon = None
         self.b_epsilon = None

@@ -12,7 +12,7 @@ import argparse
 
 from env_preprocessor import preprocess_env
 import util
-from agents.dqn import DQN
+from agents.dpdn import DPDN
 
 logger = logging.getLogger(__name__)  # set up a name so that matplotlib does not pollute the log
 logger.setLevel(logging.DEBUG)
@@ -43,29 +43,30 @@ def get_arg_parser():
     parser.add_argument("--episodes_per_save", type=int)
     parser.add_argument("--output_dir")
     parser.add_argument("--seed", type=int)
-    parser.add_argument("--resume_from_checkpoint", type=int)
+    parser.add_argument("--resume_from_checkpoint", type=int, default=0)
 
     parser.add_argument("--epsilon_start", type=float, help="for epsilon-greedy")
     parser.add_argument("--epsilon_end", type=float, help="for epsilon-greedy")
     parser.add_argument("--epsilon_decay", type=float, help="for epsilon-greedy")
+
+    parser.add_argument("--sigma0", type=float, help="for noisy network")
+    parser.add_argument("--alpha", type=float, help="for priority replay buffer")
+    parser.add_argument("--beta0", type=float, help="for priority replay buffer")
 
     return parser
 
 
 if __name__ == "__main__":
     parser = get_arg_parser()
-    args = parser.parse_args()
 
+    # precedence: command line argument > config file argument > default
+    args = parser.parse_args()
     if args.config is not None:
         with open(args.config, "r") as file:
-            config = json.load(file)
-        # Command line arguments overwrite arguments in the config file.
-        # Make sure all arguments appear in config.
-        new_config = {key: value for key, value in vars(args).items()
-                      if value is not None or key not in config}
-        config.update(new_config)
-    else:
-        config = vars(args)
+            vars(args).update(json.load(file))
+    parser.parse_args(namespace=args)
+
+    config = vars(args)
 
     frame_size = config["frame_size"]
     if isinstance(frame_size, int):  # type a single number in config file
@@ -103,11 +104,10 @@ if __name__ == "__main__":
         checkpoint_dir = output_dir / f"checkpoint-{resume_from_checkpoint}"
         logger.info(f"Loading checkpoint from {checkpoint_dir}")
 
-        agent = DQN((config["stack_frames"], *config["frame_size"]), env.action_space.n, config,
+        agent = DPDN((config["stack_frames"], *config["frame_size"]), env.action_space.n, config,
                     checkpoint_dir)
     else:
-        agent = DQN((config["stack_frames"], *config["frame_size"]), env.action_space.n, config)
-        resume_from_checkpoint = 0
+        agent = DPDN((config["stack_frames"], *config["frame_size"]), env.action_space.n, config)
 
 
     logger.info(f"Start collecting {steps_before_training} transitions")
@@ -116,9 +116,9 @@ if __name__ == "__main__":
         action = agent.get_action(state)
         next_state, reward, done, info = env.step(action)
 
-        if len(agent.replay_buffer.buffer) == agent.replay_buffer.buffer.maxlen // 2:
+        if len(agent.replay_buffer) == agent.replay_buffer.capacity // 2:
             logger.debug("replay buffer half full")
-        elif len(agent.replay_buffer.buffer) == agent.replay_buffer.buffer.maxlen - 1:
+        elif len(agent.replay_buffer) == agent.replay_buffer.capacity - 1:
             logger.debug("replay buffer full")
         agent.replay_buffer.add(state, action, reward, next_state, done)
 
@@ -150,9 +150,9 @@ if __name__ == "__main__":
             next_state, reward, done, info = env.step(action)
             episode_steps += 1
 
-            if len(agent.replay_buffer.buffer) == agent.replay_buffer.buffer.maxlen // 2:
+            if len(agent.replay_buffer) == agent.replay_buffer.capacity // 2:
                 logger.debug("replay buffer half full")
-            elif len(agent.replay_buffer.buffer) == agent.replay_buffer.buffer.maxlen - 1:
+            elif len(agent.replay_buffer) == agent.replay_buffer.capacity - 1:
                 logger.debug("replay buffer full")
             agent.replay_buffer.add(state, action, reward, next_state, done)
 

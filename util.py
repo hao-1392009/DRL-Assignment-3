@@ -19,3 +19,12 @@ def fix_random_seed(seed, env):
 def shape_after_conv2d(height, width, kernel_size, stride=(1, 1), padding=(0, 0), dilation=(1, 1)):
     return int((height + 2 * padding[0] - dilation[0] * (kernel_size[0] - 1) - 1) / stride[0] + 1),\
            int((width  + 2 * padding[1] - dilation[1] * (kernel_size[1] - 1) - 1) / stride[1] + 1)
+
+def preprocess_state(frame_size: tuple, observation: np.ndarray):
+    import cv2
+    observation = cv2.cvtColor(observation, cv2.COLOR_RGB2GRAY)
+    observation = cv2.resize(
+        observation, frame_size[::-1], interpolation=cv2.INTER_AREA
+    )
+    observation = observation.astype(np.float32) / 255
+    return observation
