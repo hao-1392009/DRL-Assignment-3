@@ -1,8 +1,10 @@
 {
+    "agent": "DPDN",
     "frame_size": 84,
     "skip_frames": 4,
     "stack_frames": 4,
     "replay_buffer_size": 1000000,
+    "lz4_compress": true,
     "learning_rate": 0.00025,
     "batch_size": 32,
     "gamma": 0.99,

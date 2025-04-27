@@ -29,7 +29,7 @@ class ModifiedResizeObservation(ResizeObservation):
         )
         return observation
 
-def preprocess_env(env, frame_size, skip_frames, stack_frames):
+def preprocess_env(env, frame_size, skip_frames, stack_frames, lz4_compress):
     """
     observations returned by the env are gym.wrappers.LazyFrames
     """
@@ -37,5 +37,5 @@ def preprocess_env(env, frame_size, skip_frames, stack_frames):
     env = GrayScaleObservation(env)
     env = ModifiedResizeObservation(env, frame_size)
     env = TransformObservation(env, lambda observation: observation / 255)
-    env = FrameStack(env, stack_frames)
+    env = FrameStack(env, stack_frames, lz4_compress)
     return env

@@ -9,11 +9,12 @@ import matplotlib.pyplot as plt
 import logging
 import sys
 import argparse
+import importlib
 
 from env_preprocessor import preprocess_env
 import util
 from replay_buffer import NStepBuffer
-from agents.rainbow import Rainbow
+from agents.agent_base import Agent
 
 logger = logging.getLogger(__name__)  # set up a name so that matplotlib does not pollute the log
 logger.setLevel(logging.DEBUG)
@@ -28,9 +29,11 @@ logger.addHandler(stdout_handler)
 def get_arg_parser():
     parser = argparse.ArgumentParser()
     parser.add_argument("--config")
+    parser.add_argument("--agent", help="class name of the agent (case-sensitive)")
     parser.add_argument("--frame_size", type=int, nargs="*")
     parser.add_argument("--skip_frames", type=int)
     parser.add_argument("--stack_frames", type=int)
+    parser.add_argument("--lz4_compress", action="store_true")
     parser.add_argument("--replay_buffer_size", type=int)
     parser.add_argument("--learning_rate", type=float)
     parser.add_argument("--adam_epsilon", type=float)
@@ -95,7 +98,9 @@ def main():
 
     env = gym_super_mario_bros.make('SuperMarioBros-v0')
     env = JoypadSpace(env, COMPLEX_MOVEMENT)
-    env = preprocess_env(env, config["frame_size"], config["skip_frames"], config["stack_frames"])
+    env = preprocess_env(env,
+        config["frame_size"], config["skip_frames"], config["stack_frames"], config["lz4_compress"]
+    )
 
     util.fix_random_seed(config["seed"], env)
 
@@ -112,8 +117,12 @@ def main():
         logger.info(f"Loading checkpoint from {checkpoint_dir}")
     else:
         checkpoint_dir = None
-    agent = Rainbow((config["stack_frames"], *config["frame_size"]), env.action_space.n, config,
-                    checkpoint_dir)
+
+    agent_module = importlib.import_module("agents." + config["agent"].lower())
+    agent_class = getattr(agent_module, config["agent"])
+    agent: Agent = agent_class(
+        (config["stack_frames"], *config["frame_size"]), env.action_space.n, config, checkpoint_dir
+    )
 
     n_step_buffer = NStepBuffer(config["n_step_td"], config["gamma"], agent.replay_buffer)
 
