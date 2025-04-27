@@ -13,7 +13,7 @@ import argparse
 from env_preprocessor import preprocess_env
 import util
 from replay_buffer import NStepBuffer
-from agents.dpdn import DPDN
+from agents.rainbow import Rainbow
 
 logger = logging.getLogger(__name__)  # set up a name so that matplotlib does not pollute the log
 logger.setLevel(logging.DEBUG)
@@ -33,6 +33,7 @@ def get_arg_parser():
     parser.add_argument("--stack_frames", type=int)
     parser.add_argument("--replay_buffer_size", type=int)
     parser.add_argument("--learning_rate", type=float)
+    parser.add_argument("--adam_epsilon", type=float)
     parser.add_argument("--batch_size", type=int)
     parser.add_argument("--gamma", type=float, help="discount factor")
     parser.add_argument("--device")
@@ -54,6 +55,10 @@ def get_arg_parser():
     parser.add_argument("--sigma0", type=float, help="for noisy network")
     parser.add_argument("--alpha", type=float, help="for priority replay buffer")
     parser.add_argument("--beta0", type=float, help="for priority replay buffer")
+
+    parser.add_argument("--num_atoms", type=int, help="for distributional output")
+    parser.add_argument("--v_min", type=float, help="for distributional output")
+    parser.add_argument("--v_max", type=float, help="for distributional output")
 
     return parser
 
@@ -106,10 +111,10 @@ if __name__ == "__main__":
         checkpoint_dir = output_dir / f"checkpoint-{resume_from_checkpoint}"
         logger.info(f"Loading checkpoint from {checkpoint_dir}")
 
-        agent = DPDN((config["stack_frames"], *config["frame_size"]), env.action_space.n, config,
+        agent = Rainbow((config["stack_frames"], *config["frame_size"]), env.action_space.n, config,
                     checkpoint_dir)
     else:
-        agent = DPDN((config["stack_frames"], *config["frame_size"]), env.action_space.n, config)
+        agent = Rainbow((config["stack_frames"], *config["frame_size"]), env.action_space.n, config)
 
     n_step_buffer = NStepBuffer(config["n_step_td"], config["gamma"], agent.replay_buffer)
 
@@ -182,6 +187,8 @@ if __name__ == "__main__":
 
             avg_reward_history.append((episode, avg_reward))
             reward_history = []
+
+            agent.on_log(logger)
 
         if episode % episodes_per_save == 0:
             checkpoint_dir = output_dir / f"checkpoint-{episode}"

@@ -1,9 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import torch.nn.functional as F
 import numpy as np
-import random
-import collections
 
 from noisy_netork import NoisyLinear
 from agents.agent_base import Agent
@@ -11,16 +10,17 @@ from replay_buffer import PrioritizedReplayBuffer
 import util
 
 
-class DPDNNetwork(nn.Module):
-    def __init__(self, state_shape, num_actions, sigma0):
+class RainbowNetwork(nn.Module):
+    def __init__(self, state_shape, num_actions, num_atoms, sigma0):
         super().__init__()
+        self.num_actions = num_actions
+        self.num_atoms = num_atoms
 
         channel, height, width = state_shape
         height, width = util.shape_after_conv2d(height, width, kernel_size=(8, 8), stride=(4, 4))
         height, width = util.shape_after_conv2d(height, width, kernel_size=(4, 4), stride=(2, 2))
         height, width = util.shape_after_conv2d(height, width, kernel_size=(3, 3), stride=(1, 1))
 
-        # similar network architecture as in rainbow dqn paper
         self.convolution = nn.Sequential(
             nn.Conv2d(in_channels=channel, out_channels=32, kernel_size=8, stride=4),
             nn.ReLU(),
@@ -34,22 +34,26 @@ class DPDNNetwork(nn.Module):
         self.value = nn.Sequential(
             NoisyLinear(64 * height * width, 512, sigma0),
             nn.ReLU(),
-            NoisyLinear(512, 1, sigma0)
+            NoisyLinear(512, 1 * num_atoms, sigma0)
         )
 
         self.advantage = nn.Sequential(
             NoisyLinear(64 * height * width, 512, sigma0),
             nn.ReLU(),
-            NoisyLinear(512, num_actions, sigma0)
+            NoisyLinear(512, num_actions * num_atoms, sigma0)
         )
 
     def forward(self, x):
         x = self.convolution(x)
 
-        value = self.value(x)
-        advantage = self.advantage(x)
+        value = self.value(x).view(-1, 1, self.num_atoms)
+        advantage = self.advantage(x).view(-1, self.num_actions, self.num_atoms)
 
-        return value + advantage - advantage.mean(-1, keepdim=True)
+        q_logit = value + advantage - advantage.mean(dim=-2, keepdim=True)
+
+        # input shape (batch_size, channel, width, height)
+        # return shape (batch_size, num_actions, num_atoms)
+        return F.softmax(q_logit, dim=-1)
 
     def resample_noise(self):
         self.value[0].resample_noise()
@@ -57,12 +61,27 @@ class DPDNNetwork(nn.Module):
         self.advantage[0].resample_noise()
         self.advantage[2].resample_noise()
 
-# Double + Prioritized replay buffer + Dueling + Noisy net DQN
-class DPDN(Agent):
+class Rainbow(Agent):
     def __init__(self, state_shape, num_actions, config, checkpoint_dir=None):
         super().__init__(config)
+        self.num_atoms = config["num_atoms"]
+        self.v_min = config["v_min"]
+        self.v_max = config["v_max"]
 
-        self.online_network = DPDNNetwork(state_shape, num_actions, config["sigma0"])
+        self.z_support = torch.linspace(self.v_min, self.v_max, self.num_atoms)
+        self.delta_z = (self.v_max - self.v_min) / (self.num_atoms - 1)
+
+        self.idx_offset = (torch.arange(self.batch_size).unsqueeze(1) * self.num_atoms)\
+                          .expand(self.batch_size, self.num_atoms)
+        assert config["steps_before_training"] + config["steps_per_online_update"]\
+               >= config["n_step_td"]-1 + self.batch_size,\
+               "Current implementation requires collecting more transitions than batch size "\
+               "before updating the online network"
+
+
+        self.online_network = RainbowNetwork(
+            state_shape, num_actions, self.num_atoms, config["sigma0"]
+        )
 
         ### load pretrained model ###
         from agents.dqn import DQNNetwork
@@ -74,14 +93,11 @@ class DPDN(Agent):
 
         for i in 0, 2, 4:
             self.online_network.convolution[i].load_state_dict(pretrained.net[i].state_dict())
-
-        self.online_network.advantage[0].w_mu.data.copy_(pretrained.net[7].weight.data)
-        self.online_network.advantage[0].b_mu.data.copy_(pretrained.net[7].bias.data)
-        self.online_network.advantage[2].w_mu.data.copy_(pretrained.net[9].weight.data)
-        self.online_network.advantage[2].b_mu.data.copy_(pretrained.net[9].bias.data)
         #############################
 
-        self.target_network = DPDNNetwork(state_shape, num_actions, config["sigma0"])
+        self.target_network = RainbowNetwork(
+            state_shape, num_actions, self.num_atoms, config["sigma0"]
+        )
         for param in self.target_network.parameters():
             param.requires_grad = False
 
@@ -98,9 +114,13 @@ class DPDN(Agent):
 
         self.online_network.to(self.device)
         self.target_network.to(self.device)
+        self.z_support = self.z_support.to(self.device)
+        self.idx_offset = self.idx_offset.to(self.device)
         self.target_network.eval()
 
-        self.optimizer = optim.Adam(self.online_network.parameters(), config["learning_rate"])
+        self.optimizer = optim.Adam(
+            self.online_network.parameters(), config["learning_rate"], eps=config["adam_epsilon"]
+        )
         if checkpoint_dir is not None:
             self.optimizer.load_state_dict(training_state["optimizer"])
 
@@ -110,6 +130,12 @@ class DPDN(Agent):
         self.total_episodes = config["resume_from_checkpoint"] + config["total_episodes"]
         self.on_episode_end(config["resume_from_checkpoint"])  # set up self.beta
 
+
+        self.output_history = torch.zeros(num_actions, self.num_atoms).to(self.device)
+        self.output_count = 0
+        self.bellman = torch.zeros(self.num_atoms).to(self.device)
+        self.update_count = 0
+
     @torch.no_grad()
     def get_action(self, state):
         self.online_network.eval()
@@ -118,12 +144,17 @@ class DPDN(Agent):
         state = torch.FloatTensor(np.asarray(state)).unsqueeze(0).to(self.device)
 
         self.online_network.resample_noise()
-        return torch.argmax(self.online_network(state)).item()
+        distribution = self.online_network(state)  # shape (1, num_actions, num_atoms)
+
+        self.output_history += distribution.squeeze(0)
+        self.output_count += 1
+
+        q = (distribution * self.z_support).sum(dim=-1)  # shape (1, num_actions)
+        return torch.argmax(q).item()
 
     def update_online(self):
         transitions, weights, indices  = self.replay_buffer.sample(self.batch_size, self.beta)
         states, actions, rewards, next_states, dones = zip(*transitions)
-        batch_size = len(transitions)
 
         # cast gym.wrappers.LazyFrames to np.ndarray
         states = torch.FloatTensor(np.asarray(states)).to(self.device)
@@ -135,22 +166,45 @@ class DPDN(Agent):
         self.online_network.eval()
         with torch.no_grad():
             self.online_network.resample_noise()
-            online_next_actions = torch.argmax(self.online_network(next_states), dim=-1)
+            distribution = self.online_network(next_states)  # (batch_size, num_actions, num_atoms)
+            q = (distribution * self.z_support).sum(dim=-1)  # (batch_size, num_actions)
+            online_next_actions = torch.argmax(q, dim=-1)  # (batch_size,)
 
         self.target_network.resample_noise()
-        target_next_qs = self.target_network(next_states)[range(batch_size), online_next_actions]
-        targets = rewards + (~dones) * self.gamma_n * target_next_qs
+        target_next_dists = self.target_network(next_states)[
+            range(self.batch_size), online_next_actions, :
+        ]  # (batch_size, num_atoms)
+
+        bellman_update = (
+            rewards.unsqueeze(1) + (~dones.unsqueeze(1)) * self.gamma_n * self.z_support
+        )
+
+        self.bellman += bellman_update.mean(dim=0)
+        self.update_count += 1
+
+        bellman_update = bellman_update.clamp(self.v_min, self.v_max)  # (batch_size, num_atoms)
+        b = (bellman_update - self.v_min) / self.delta_z
+        l = b.floor().long()
+        u = b.ceil().long()
+
+        m = torch.zeros(self.batch_size, self.num_atoms).to(self.device)
+        m.view(-1).index_add_(
+            0, (self.idx_offset + l).view(-1), (target_next_dists * (u - b)).view(-1)
+        )
+        m.view(-1).index_add_(
+            0, (self.idx_offset + u).view(-1), (target_next_dists * (b - l)).view(-1)
+        )
 
         self.online_network.train()
         self.online_network.resample_noise()
-        predictions = self.online_network(states)[range(batch_size), actions]
+        predictions = self.online_network(states)[range(self.batch_size), actions, :]
 
-        td_error = targets - predictions
+        loss = - (m * predictions.log()).sum(dim=-1)  # (batch_size,)
 
-        priorities = (td_error.abs() + 1e-6).detach().cpu().tolist()
+        priorities = (loss + 1e-6).detach().cpu().tolist()
         self.replay_buffer.update_priorities(indices, priorities)
 
-        loss = (weights * td_error.square()).mean()
+        loss = (weights * loss).mean()
 
         self.optimizer.zero_grad()
         loss.backward()
@@ -169,3 +223,12 @@ class DPDN(Agent):
     def on_episode_end(self, episode):
         # linear annealing to 1
         self.beta = self.beta0 + episode/(self.total_episodes - 1) * (1 - self.beta0)
+
+    def on_log(self, logger):
+        logger.debug(f"output distribution\n{self.output_history / self.output_count}")
+        self.output_history.zero_()
+        self.output_count = 0
+
+        logger.debug(f"bellman update\n{self.bellman / self.update_count}")
+        self.bellman.zero_()
+        self.update_count = 0

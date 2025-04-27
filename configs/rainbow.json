@@ -1,0 +1,28 @@
+{
+    "frame_size": 84,
+    "skip_frames": 4,
+    "stack_frames": 4,
+    "replay_buffer_size": 1000000,
+    "learning_rate": 0.0000625,
+    "adam_epsilon": 1.5e-4,
+    "batch_size": 32,
+    "gamma": 0.99,
+    "device": "cuda",
+    "steps_before_training": 80000,
+    "steps_per_online_update": 4,
+    "steps_per_target_update": 32000,
+    "total_episodes": 10000,
+    "episodes_per_log": 100,
+    "episodes_per_save": 1000,
+    "n_step_td":3,
+    "output_dir": "models/rainbow",
+    "seed": 5500,
+
+    "sigma0": 0.5,
+    "alpha": 0.5,
+    "beta0": 0.4,
+
+    "num_atoms": 51,
+    "v_min": -20,
+    "v_max": 30
+}

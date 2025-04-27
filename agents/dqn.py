@@ -102,7 +102,7 @@ class DQN(Agent):
         dones = torch.BoolTensor(dones).to(self.device)
 
         max_next_qs = torch.max(self.target_network(next_states), dim=-1).values
-        targets = rewards + (~dones) * self.gamma**self.n_step_td * max_next_qs
+        targets = rewards + (~dones) * self.gamma_n * max_next_qs
 
         self.online_network.train()
         predictions = self.online_network(states)[range(states.shape[0]), actions]
@@ -133,7 +133,7 @@ class DQNTest:
 
         self.online_network = DQNNetwork(self.state_shape, self.num_actions)
         self.online_network.load_state_dict(
-            torch.load("models/dqn_pt.16000.model.pt", weights_only=False)
+            torch.load("models/dqn_pt.20000.model.pt", weights_only=False)
         )
         self.online_network.eval()
 
@@ -162,13 +162,13 @@ class DQNTest:
         return self.action
 
 class _DQNTest:
-    def __init__(self, state_shape, num_actions, model_dir):
+    def __init__(self, state_shape, num_actions, model_file):
         self.num_actions = num_actions
         self.epsilon = 0.1
 
         self.online_network = DQNNetwork(state_shape, num_actions)
         self.online_network.load_state_dict(
-            torch.load(model_dir / "model.pt", weights_only=False)
+            torch.load(model_file, weights_only=False)
         )
         self.online_network.eval()
 

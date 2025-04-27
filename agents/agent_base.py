@@ -5,8 +5,7 @@ class Agent(abc.ABC):
     def __init__(self, config):
         self.batch_size = config["batch_size"]
         self.device = config["device"]
-        self.gamma = config["gamma"]
-        self.n_step_td = config["n_step_td"]
+        self.gamma_n = config["gamma"] ** config["n_step_td"]
         self.is_training = False
 
         self.target_network = None
@@ -32,4 +31,7 @@ class Agent(abc.ABC):
         pass
 
     def on_episode_end(self, episode):
+        pass
+
+    def on_log(self, logger):
         pass
