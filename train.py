@@ -63,7 +63,7 @@ def get_arg_parser():
     return parser
 
 
-if __name__ == "__main__":
+def main():
     parser = get_arg_parser()
 
     # precedence: command line argument > config file argument > default
@@ -219,3 +219,7 @@ if __name__ == "__main__":
         plt.ylabel("Average Reward")
         plt.title("Training History")
         plt.savefig(output_dir / "training_history.png")
+
+
+if __name__ == "__main__":
+    main()

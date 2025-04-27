@@ -131,7 +131,7 @@ class Rainbow(Agent):
         self.on_episode_end(config["resume_from_checkpoint"])  # set up self.beta
 
 
-        self.output_history = torch.zeros(num_actions, self.num_atoms).to(self.device)
+        self.output_history = torch.zeros(self.num_atoms).to(self.device)
         self.output_count = 0
         self.bellman = torch.zeros(self.num_atoms).to(self.device)
         self.update_count = 0
@@ -145,12 +145,13 @@ class Rainbow(Agent):
 
         self.online_network.resample_noise()
         distribution = self.online_network(state)  # shape (1, num_actions, num_atoms)
+        q = (distribution * self.z_support).sum(dim=-1)  # shape (1, num_actions)
+        action = torch.argmax(q).item()
 
-        self.output_history += distribution.squeeze(0)
+        self.output_history += distribution[0, action]
         self.output_count += 1
 
-        q = (distribution * self.z_support).sum(dim=-1)  # shape (1, num_actions)
-        return torch.argmax(q).item()
+        return action
 
     def update_online(self):
         transitions, weights, indices = self.replay_buffer.sample(self.batch_size, self.beta)
@@ -225,10 +226,22 @@ class Rainbow(Agent):
         self.beta = self.beta0 + episode/(self.total_episodes - 1) * (1 - self.beta0)
 
     def on_log(self, logger):
-        logger.debug(f"output distribution\n{self.output_history / self.output_count}")
+        k = 5
+
+        sort, indices = (self.output_history / self.output_count).sort()
+        sort = sort.cpu().numpy()
+        indices = indices.cpu().numpy()
+        logger.debug("output distribution:\n"
+                     f"\tlargest {sort[-k:]}, indices {indices[-k:]}\n"
+                     f"\tsmallest {sort[:k]}, indices {indices[:k]}"
+        )
         self.output_history.zero_()
         self.output_count = 0
 
-        logger.debug(f"bellman update\n{self.bellman / self.update_count}")
+        bellman = (self.bellman / self.update_count).cpu().numpy()
+        logger.debug("bellman update:\n"
+                     f"\tlargest {bellman[-2*k :]}\n"
+                     f"\tsmallest {bellman[: 2*k]}"
+        )
         self.bellman.zero_()
         self.update_count = 0
