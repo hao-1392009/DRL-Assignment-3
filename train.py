@@ -53,8 +53,8 @@ def get_arg_parser():
     parser.add_argument("--epsilon_decay", type=float, help="for epsilon-greedy")
 
     parser.add_argument("--sigma0", type=float, help="for noisy network")
-    parser.add_argument("--alpha", type=float, help="for priority replay buffer")
-    parser.add_argument("--beta0", type=float, help="for priority replay buffer")
+    parser.add_argument("--alpha", type=float, help="for prioritized replay buffer")
+    parser.add_argument("--beta0", type=float, help="for prioritized replay buffer")
 
     parser.add_argument("--num_atoms", type=int, help="for distributional output")
     parser.add_argument("--v_min", type=float, help="for distributional output")
@@ -110,11 +110,10 @@ if __name__ == "__main__":
     if resume_from_checkpoint:
         checkpoint_dir = output_dir / f"checkpoint-{resume_from_checkpoint}"
         logger.info(f"Loading checkpoint from {checkpoint_dir}")
-
-        agent = Rainbow((config["stack_frames"], *config["frame_size"]), env.action_space.n, config,
-                    checkpoint_dir)
     else:
-        agent = Rainbow((config["stack_frames"], *config["frame_size"]), env.action_space.n, config)
+        checkpoint_dir = None
+    agent = Rainbow((config["stack_frames"], *config["frame_size"]), env.action_space.n, config,
+                    checkpoint_dir)
 
     n_step_buffer = NStepBuffer(config["n_step_td"], config["gamma"], agent.replay_buffer)
 
@@ -131,10 +130,10 @@ if __name__ == "__main__":
             logger.debug("replay buffer full")
         n_step_buffer.add(state, action, reward, next_state, done)
 
-        state = next_state
-
         if done:
             state = env.reset()
+        else:
+            state = next_state
 
 
     reward_history = []
@@ -182,7 +181,7 @@ if __name__ == "__main__":
         if episode % episodes_per_log == 0:
             avg_reward = np.mean(reward_history)
             logger.info(f"Episode {episode}, Average Reward: {avg_reward}")
-            logger.debug(f"avg steps per episode: {np.mean(lst_episode_steps)}")
+            logger.debug(f"avg step per episode: {np.mean(lst_episode_steps)}")
             lst_episode_steps = []
 
             avg_reward_history.append((episode, avg_reward))

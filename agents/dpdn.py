@@ -5,7 +5,7 @@ import numpy as np
 import random
 import collections
 
-from noisy_netork import NoisyLinear
+from noisy_network import NoisyLinear
 from agents.agent_base import Agent
 from replay_buffer import PrioritizedReplayBuffer
 import util
@@ -121,7 +121,7 @@ class DPDN(Agent):
         return torch.argmax(self.online_network(state)).item()
 
     def update_online(self):
-        transitions, weights, indices  = self.replay_buffer.sample(self.batch_size, self.beta)
+        transitions, weights, indices = self.replay_buffer.sample(self.batch_size, self.beta)
         states, actions, rewards, next_states, dones = zip(*transitions)
         batch_size = len(transitions)
 
@@ -167,5 +167,5 @@ class DPDN(Agent):
         }, output_dir / "training_state.pt")
 
     def on_episode_end(self, episode):
-        # linear annealing to 1
+        # linearly anneal beta to 1
         self.beta = self.beta0 + episode/(self.total_episodes - 1) * (1 - self.beta0)

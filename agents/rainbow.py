@@ -4,7 +4,7 @@ import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
 
-from noisy_netork import NoisyLinear
+from noisy_network import NoisyLinear
 from agents.agent_base import Agent
 from replay_buffer import PrioritizedReplayBuffer
 import util
@@ -153,7 +153,7 @@ class Rainbow(Agent):
         return torch.argmax(q).item()
 
     def update_online(self):
-        transitions, weights, indices  = self.replay_buffer.sample(self.batch_size, self.beta)
+        transitions, weights, indices = self.replay_buffer.sample(self.batch_size, self.beta)
         states, actions, rewards, next_states, dones = zip(*transitions)
 
         # cast gym.wrappers.LazyFrames to np.ndarray
@@ -221,7 +221,7 @@ class Rainbow(Agent):
         }, output_dir / "training_state.pt")
 
     def on_episode_end(self, episode):
-        # linear annealing to 1
+        # linearly anneal beta to 1
         self.beta = self.beta0 + episode/(self.total_episodes - 1) * (1 - self.beta0)
 
     def on_log(self, logger):
