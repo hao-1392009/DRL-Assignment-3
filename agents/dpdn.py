@@ -57,6 +57,12 @@ class DPDNNetwork(nn.Module):
         self.advantage[0].resample_noise()
         self.advantage[2].resample_noise()
 
+    def zero_noise(self):
+        self.value[0].zero_noise()
+        self.value[2].zero_noise()
+        self.advantage[0].zero_noise()
+        self.advantage[2].zero_noise()
+
 # Double + Prioritized replay buffer + Dueling + Noisy net DQN
 class DPDN(Agent):
     def __init__(self, state_shape, num_actions, config, checkpoint_dir=None):
@@ -169,3 +175,40 @@ class DPDN(Agent):
     def on_episode_end(self, episode):
         # linearly anneal beta to 1
         self.beta = self.beta0 + episode/(self.total_episodes - 1) * (1 - self.beta0)
+
+class DPDNTest:
+    def __init__(self):
+        num_actions = 12
+        self.state_shape = (4, 84, 84)
+        self.skip_frames = 4
+        sigma0 = 0.5
+
+        self.online_network = DPDNNetwork(self.state_shape, num_actions, sigma0)
+        self.online_network.load_state_dict(
+            torch.load("models/dpdn_30w_mem/checkpoint-6000/model.pt", weights_only=False)
+        )
+        self.online_network.eval()
+        self.online_network.zero_noise()
+
+        self.frame_skipped = 0
+        self.action = None
+        self.frame_stack = collections.deque(maxlen=self.state_shape[0])
+
+    def act(self, observation):
+        if self.frame_skipped == 0:
+            observation = util.preprocess_state(self.state_shape[1:], observation)
+
+            if len(self.frame_stack) == 0:
+                for _ in range(self.state_shape[0]):
+                    self.frame_stack.append(observation)
+            else:
+                self.frame_stack.append(observation)
+
+            with torch.no_grad():
+                state = torch.FloatTensor(np.array(self.frame_stack)).unsqueeze(0)
+
+                self.online_network.resample_noise()
+                self.action = torch.argmax(self.online_network(state)).item()
+
+        self.frame_skipped = (self.frame_skipped + 1) % self.skip_frames
+        return self.action

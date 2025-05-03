@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.optim as optim
 import torch.nn.functional as F
 import numpy as np
+import collections
 
 from noisy_network import NoisyLinear
 from agents.agent_base import Agent
@@ -11,10 +12,11 @@ import util
 
 
 class RainbowNetwork(nn.Module):
-    def __init__(self, state_shape, num_actions, num_atoms, sigma0):
+    def __init__(self, state_shape, num_actions, z_support, sigma0):
         super().__init__()
         self.num_actions = num_actions
-        self.num_atoms = num_atoms
+        self.z_support = z_support
+        self.num_atoms = self.z_support.shape[0]
 
         channel, height, width = state_shape
         height, width = util.shape_after_conv2d(height, width, kernel_size=(8, 8), stride=(4, 4))
@@ -34,16 +36,16 @@ class RainbowNetwork(nn.Module):
         self.value = nn.Sequential(
             NoisyLinear(64 * height * width, 512, sigma0),
             nn.ReLU(),
-            NoisyLinear(512, 1 * num_atoms, sigma0)
+            NoisyLinear(512, 1 * self.num_atoms, sigma0)
         )
 
         self.advantage = nn.Sequential(
             NoisyLinear(64 * height * width, 512, sigma0),
             nn.ReLU(),
-            NoisyLinear(512, num_actions * num_atoms, sigma0)
+            NoisyLinear(512, num_actions * self.num_atoms, sigma0)
         )
 
-    def forward(self, x):
+    def q_distribution(self, x):
         x = self.convolution(x)
 
         value = self.value(x).view(-1, 1, self.num_atoms)
@@ -55,11 +57,22 @@ class RainbowNetwork(nn.Module):
         # return shape (batch_size, num_actions, num_atoms)
         return F.softmax(q_logit, dim=-1)
 
+    def q_value(self, x):
+        # input shape (batch_size, channel, width, height)
+        # return shape (batch_size, num_actions)
+        return (self.q_distribution(x) * self.z_support).sum(dim=-1)
+
     def resample_noise(self):
         self.value[0].resample_noise()
         self.value[2].resample_noise()
         self.advantage[0].resample_noise()
         self.advantage[2].resample_noise()
+
+    def zero_noise(self):
+        self.value[0].zero_noise()
+        self.value[2].zero_noise()
+        self.advantage[0].zero_noise()
+        self.advantage[2].zero_noise()
 
 class Rainbow(Agent):
     def __init__(self, state_shape, num_actions, config, checkpoint_dir=None):
@@ -80,7 +93,7 @@ class Rainbow(Agent):
 
 
         self.online_network = RainbowNetwork(
-            state_shape, num_actions, self.num_atoms, config["sigma0"]
+            state_shape, num_actions, self.z_support, config["sigma0"]
         )
 
         ### load pretrained model ###
@@ -96,7 +109,7 @@ class Rainbow(Agent):
         #############################
 
         self.target_network = RainbowNetwork(
-            state_shape, num_actions, self.num_atoms, config["sigma0"]
+            state_shape, num_actions, self.z_support, config["sigma0"]
         )
         for param in self.target_network.parameters():
             param.requires_grad = False
@@ -144,7 +157,7 @@ class Rainbow(Agent):
         state = torch.FloatTensor(np.asarray(state)).unsqueeze(0).to(self.device)
 
         self.online_network.resample_noise()
-        distribution = self.online_network(state)  # shape (1, num_actions, num_atoms)
+        distribution = self.online_network.q_distribution(state)  # shape (1, num_actions, num_atoms)
         q = (distribution * self.z_support).sum(dim=-1)  # shape (1, num_actions)
         action = torch.argmax(q).item()
 
@@ -167,12 +180,11 @@ class Rainbow(Agent):
         self.online_network.eval()
         with torch.no_grad():
             self.online_network.resample_noise()
-            distribution = self.online_network(next_states)  # (batch_size, num_actions, num_atoms)
-            q = (distribution * self.z_support).sum(dim=-1)  # (batch_size, num_actions)
+            q = self.online_network.q_value(next_states)  # (batch_size, num_actions)
             online_next_actions = torch.argmax(q, dim=-1)  # (batch_size,)
 
         self.target_network.resample_noise()
-        target_next_dists = self.target_network(next_states)[
+        target_next_dists = self.target_network.q_distribution(next_states)[
             range(self.batch_size), online_next_actions, :
         ]  # (batch_size, num_atoms)
 
@@ -198,7 +210,9 @@ class Rainbow(Agent):
 
         self.online_network.train()
         self.online_network.resample_noise()
-        predictions = self.online_network(states)[range(self.batch_size), actions, :]
+        predictions = self.online_network.q_distribution(states)[
+            range(self.batch_size), actions, :
+        ]
 
         loss = - (m * predictions.log()).sum(dim=-1)  # (batch_size,)
 
@@ -245,3 +259,41 @@ class Rainbow(Agent):
         )
         self.bellman.zero_()
         self.update_count = 0
+
+class RainbowTest:
+    def __init__(self):
+        num_actions = 12
+        self.state_shape = (4, 84, 84)
+        self.skip_frames = 4
+        sigma0 = 0.5
+        z_support = torch.linspace(-20, 300, 51)
+
+        self.online_network = RainbowNetwork(self.state_shape, num_actions, z_support, sigma0)
+        self.online_network.load_state_dict(
+            torch.load("models/rainbow/checkpoint-10000/model.pt", weights_only=False)
+        )
+        self.online_network.eval()
+        self.online_network.zero_noise()
+
+        self.frame_skipped = 0
+        self.action = None
+        self.frame_stack = collections.deque(maxlen=self.state_shape[0])
+
+    def act(self, observation):
+        if self.frame_skipped == 0:
+            observation = util.preprocess_state(self.state_shape[1:], observation)
+
+            if len(self.frame_stack) == 0:
+                for _ in range(self.state_shape[0]):
+                    self.frame_stack.append(observation)
+            else:
+                self.frame_stack.append(observation)
+
+            with torch.no_grad():
+                state = torch.FloatTensor(np.array(self.frame_stack)).unsqueeze(0)
+
+                self.online_network.resample_noise()
+                self.action = torch.argmax(self.online_network.q_value(state)).item()
+
+        self.frame_skipped = (self.frame_skipped + 1) % self.skip_frames
+        return self.action

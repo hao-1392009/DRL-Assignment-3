@@ -36,5 +36,9 @@ class NoisyLinear(nn.Module):
             self.b_epsilon, self._f(torch.randn(self.in_features, device=device))
         )
 
+    def zero_noise(self):
+        self.w_epsilon.zero_()
+        self.b_epsilon.zero_()
+
     def _f(self, x: torch.Tensor):
         return x.sign() * x.abs().sqrt()
