@@ -12,6 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 from gym.wrappers import LazyFrames
+import lz4.block
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from networks import FeatureExtrator, InverseModel
@@ -46,11 +47,16 @@ def get_arg_parser():
 
     return parser
 
-def conver_data(raw_data, stack_frames, lz4_compress):
+def conver_data(raw_data, stack_frames, lz4_compress, frame_size):
     data = []
 
     frame_stack = collections.deque(maxlen=stack_frames)
     for observation, action in raw_data:
+        if lz4_compress:
+            observation = np.frombuffer(
+                lz4.block.decompress(observation), dtype=np.float32
+                ).reshape(*frame_size)
+
         if action is None:  # environment reset
             for _ in range(stack_frames):
                 frame_stack.append(observation)
@@ -148,11 +154,11 @@ def main():
     data_dir = pathlib.Path(args.data_dir)
     with open(data_dir / "train_data.pkl", "rb") as file:
         train_data = pickle.load(file)
-    train_data = conver_data(train_data, args.stack_frames, args.lz4_compress)
+    train_data = conver_data(train_data, args.stack_frames, args.lz4_compress, args.frame_size)
 
     with open(data_dir / "eval_data.pkl", "rb") as file:
         eval_data = pickle.load(file)
-    eval_data = conver_data(eval_data, args.stack_frames, args.lz4_compress)
+    eval_data = conver_data(eval_data, args.stack_frames, args.lz4_compress, args.frame_size)
 
     train_dataset = FEInvDataset(train_data)
     eval_dataset = FEInvDataset(eval_data)

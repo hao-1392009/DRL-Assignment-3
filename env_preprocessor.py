@@ -36,6 +36,6 @@ def preprocess_env(env, frame_size, skip_frames, stack_frames, lz4_compress):
     env = FrameSkip(env, skip_frames)
     env = GrayScaleObservation(env)
     env = ModifiedResizeObservation(env, frame_size)
-    env = TransformObservation(env, lambda observation: observation / 255)
+    env = TransformObservation(env, lambda observation: observation.astype(np.float32) / 255)
     env = FrameStack(env, stack_frames, lz4_compress)
     return env

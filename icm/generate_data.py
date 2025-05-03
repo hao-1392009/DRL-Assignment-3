@@ -11,6 +11,7 @@ from nes_py.wrappers import JoypadSpace
 import tqdm
 import numpy as np
 import torch
+import lz4.block
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from env_preprocessor import preprocess_env
@@ -36,13 +37,16 @@ def get_arg_parser():
 
     return parser
 
-def collect_data(num_data, env, agent, random_init_steps, epsilon, device):
+def collect_data(num_data, env, agent, random_init_steps, epsilon, device, lz4_compress):
     data = []
     episode_rewards = []
     with tqdm.tqdm(total=num_data) as pbar:
         while pbar.n < num_data:
             state = env.reset()
-            data.append((state[-1], None))
+            if lz4_compress:
+                data.append((lz4.block.compress(state[-1]), None))
+            else:
+                data.append((state[-1], None))
 
             total_reward = 0
 
@@ -50,7 +54,10 @@ def collect_data(num_data, env, agent, random_init_steps, epsilon, device):
             for _ in range(min(random_init_steps, num_data - pbar.n)):
                 action = env.action_space.sample()
                 state, reward, done, info = env.step(action)
-                data.append((state[-1], np.int8(action)))
+                if lz4_compress:
+                    data.append((lz4.block.compress(state[-1]), np.int8(action)))
+                else:
+                    data.append((state[-1], np.int8(action)))
                 pbar.update()
 
                 total_reward += reward
@@ -64,7 +71,10 @@ def collect_data(num_data, env, agent, random_init_steps, epsilon, device):
                     action = agent._act(state)
 
                 state, reward, done, info = env.step(action)
-                data.append((state[-1], np.int8(action)))
+                if lz4_compress:
+                    data.append((lz4.block.compress(state[-1]), np.int8(action)))
+                else:
+                    data.append((state[-1], np.int8(action)))
                 pbar.update()
 
                 total_reward += reward
@@ -75,16 +85,16 @@ def collect_data(num_data, env, agent, random_init_steps, epsilon, device):
     return data, len(episode_rewards), np.mean(episode_rewards)
 
 def generate_data(num_data_rand, num_data_model, type, output_dir,
-                  env, agent, random_init_steps, epsilon, device):
+                  env, agent, random_init_steps, epsilon, device, lz4_compress):
     print(f"Start collecting {num_data_model} {type} data without random action selection")
     all_data, num_episodes, avg_reward = collect_data(
-        num_data_model, env, agent, random_init_steps, 0, device
+        num_data_model, env, agent, random_init_steps, 0, device, lz4_compress
     )
     print(f"Total full episodes: {num_episodes}, average reward per episode: {avg_reward}")
 
     print(f"Start collecting {num_data_rand} {type} data with random action selection")
     data, num_episodes, avg_reward = collect_data(
-        num_data_rand, env, agent, random_init_steps, epsilon, device
+        num_data_rand, env, agent, random_init_steps, epsilon, device, lz4_compress
     )
     print(f"Total full episodes: {num_episodes}, average reward per episode: {avg_reward}")
 
@@ -129,12 +139,12 @@ def main():
     num_data_rand = int(args.num_train_data * args.random_act_ratio)
     num_data_model = args.num_train_data - num_data_rand
     generate_data(num_data_rand, num_data_model, "train", output_dir,
-                  env, agent, args.random_init_steps, args.epsilon, args.device)
+                  env, agent, args.random_init_steps, args.epsilon, args.device, args.lz4_compress)
 
     num_data_rand = int(args.num_eval_data * args.random_act_ratio)
     num_data_model = args.num_eval_data - num_data_rand
     generate_data(num_data_rand, num_data_model, "eval", output_dir,
-                  env, agent, args.random_init_steps, args.epsilon, args.device)
+                  env, agent, args.random_init_steps, args.epsilon, args.device, args.lz4_compress)
 
 
 if __name__ == "__main__":
