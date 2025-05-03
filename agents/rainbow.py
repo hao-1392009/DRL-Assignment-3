@@ -289,11 +289,13 @@ class RainbowTest:
             else:
                 self.frame_stack.append(observation)
 
-            with torch.no_grad():
-                state = torch.FloatTensor(np.array(self.frame_stack)).unsqueeze(0)
-
-                self.online_network.resample_noise()
-                self.action = torch.argmax(self.online_network.q_value(state)).item()
+            state = torch.FloatTensor(np.array(self.frame_stack)).unsqueeze(0)
+            self.action = self._act(state)
 
         self.frame_skipped = (self.frame_skipped + 1) % self.skip_frames
         return self.action
+
+    @torch.no_grad()
+    def _act(self, state: torch.FloatTensor):
+        self.online_network.resample_noise()
+        return torch.argmax(self.online_network.q_value(state)).item()

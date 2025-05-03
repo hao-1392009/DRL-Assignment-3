@@ -28,6 +28,7 @@ logger.addHandler(stdout_handler)
 
 def get_arg_parser():
     parser = argparse.ArgumentParser()
+
     parser.add_argument("--config")
     parser.add_argument("--agent", help="class name of the agent (case-sensitive)")
     parser.add_argument("--frame_size", type=int, nargs="*")
