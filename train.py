@@ -51,6 +51,7 @@ def get_arg_parser():
     parser.add_argument("--seed", type=int)
     parser.add_argument("--resume_from_checkpoint", type=int, default=0)
     parser.add_argument("--n_step_td", type=int, default=1)
+    parser.add_argument("--game_score_scalar", type=float, default=0)
 
     parser.add_argument("--epsilon_start", type=float, help="for epsilon-greedy")
     parser.add_argument("--epsilon_end", type=float, help="for epsilon-greedy")
@@ -112,6 +113,7 @@ def main():
     episodes_per_log = config["episodes_per_log"]
     episodes_per_save = config["episodes_per_save"]
     resume_from_checkpoint = config["resume_from_checkpoint"]
+    game_score_scalar = config["game_score_scalar"]
 
     if resume_from_checkpoint:
         checkpoint_dir = output_dir / f"checkpoint-{resume_from_checkpoint}"
@@ -130,23 +132,29 @@ def main():
 
     logger.info(f"Start collecting {steps_before_training} transitions")
     state = env.reset()
+    game_score = 0
     for _ in range(steps_before_training):
         action = agent.get_action(state)
         next_state, reward, done, info = env.step(action)
+
+        additional_reward = (info["score"] - game_score) * game_score_scalar
 
         if len(agent.replay_buffer) == agent.replay_buffer.capacity // 2:
             logger.debug("replay buffer half full")
         elif len(agent.replay_buffer) == agent.replay_buffer.capacity - 1:
             logger.debug("replay buffer full")
-        n_step_buffer.add(state, action, reward, next_state, done)
+        n_step_buffer.add(state, action, reward + additional_reward, next_state, done)
 
         if done:
             state = env.reset()
+            game_score = 0
         else:
             state = next_state
+            game_score = info["score"]
 
 
     reward_history = []
+    game_score_history = []
     avg_reward_history = []
     avg_reward_history_file = output_dir / "avg_reward_history.txt"
 
@@ -160,6 +168,7 @@ def main():
         state = env.reset()
         done = False
         total_reward = 0
+        game_score = 0
 
         episode_steps = 0
 
@@ -168,11 +177,13 @@ def main():
             next_state, reward, done, info = env.step(action)
             episode_steps += 1
 
+            additional_reward = (info["score"] - game_score) * game_score_scalar
+
             if len(agent.replay_buffer) == agent.replay_buffer.capacity // 2:
                 logger.debug("replay buffer half full")
             elif len(agent.replay_buffer) == agent.replay_buffer.capacity - 1:
                 logger.debug("replay buffer full")
-            n_step_buffer.add(state, action, reward, next_state, done)
+            n_step_buffer.add(state, action, reward + additional_reward, next_state, done)
 
             step_counter += 1
             if step_counter % steps_per_online_update == 0:
@@ -181,21 +192,30 @@ def main():
                 agent.update_target()
 
             state = next_state
+            game_score = info["score"]
             total_reward += reward
 
         agent.on_episode_end(episode)
 
         reward_history.append(total_reward)
+        game_score_history.append(info["score"])
         lst_episode_steps.append(episode_steps)
 
         if episode % episodes_per_log == 0:
             avg_reward = np.mean(reward_history)
-            logger.info(f"Episode {episode}, Average Reward: {avg_reward}")
+            if game_score_scalar:
+                logger.info(
+                    f"Episode {episode}, Env Reward: {avg_reward}"
+                    f", Game Score: {np.mean(game_score_history)}"
+                )
+            else:
+                logger.info(f"Episode {episode}, Average Reward: {avg_reward}")
             logger.debug(f"avg step per episode: {np.mean(lst_episode_steps)}")
             lst_episode_steps = []
 
             avg_reward_history.append((episode, avg_reward))
             reward_history = []
+            game_score_history = []
 
             agent.on_log(logger)
 
