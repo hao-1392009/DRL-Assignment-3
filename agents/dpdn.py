@@ -185,7 +185,7 @@ class DPDNTest:
 
         self.online_network = DPDNNetwork(self.state_shape, num_actions, sigma0)
         self.online_network.load_state_dict(
-            torch.load("models/dpdn_30w_mem/checkpoint-6000/model.pt", weights_only=False)
+            torch.load("model.pt", weights_only=False)
         )
         self.online_network.eval()
         self.online_network.zero_noise()
