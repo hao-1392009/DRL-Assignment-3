@@ -93,6 +93,7 @@ def eval_and_log(feature_extractor, inverse_model, eval_loader, device,
     inverse_model.eval()
 
     sum_eval_loss = 0
+    total_correct = 0
     for state, next_state, action in eval_loader:
         state, next_state, action = state.to(device), next_state.to(device), action.to(device)
 
@@ -105,10 +106,13 @@ def eval_and_log(feature_extractor, inverse_model, eval_loader, device,
             loss = F.cross_entropy(prediction, action.long(), reduction="sum")
             sum_eval_loss += loss.item()
 
+            total_correct += (prediction.argmax(-1) == action).sum().item()
+
     logger.info(
         f"Epoch: {epoch:.2f}"
         f", training loss: {train_loss}"
         f", evaluation loss: {sum_eval_loss / num_eval_data}"
+        f", evaluation accuracy: {total_correct / num_eval_data}"
     )
 
     feature_extractor.train()
