@@ -7,7 +7,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 import util
 
 
-class FeatureExtrator(nn.Module):
+class FeatureExtractor(nn.Module):
     def __init__(self, state_shape):
         super().__init__()
 

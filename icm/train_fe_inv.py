@@ -15,7 +15,7 @@ from gym.wrappers import LazyFrames
 import lz4.block
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
-from networks import FeatureExtrator, InverseModel
+from networks import FeatureExtractor, InverseModel
 import util
 
 logger = logging.getLogger(__name__)
@@ -44,10 +44,11 @@ def get_arg_parser():
     parser.add_argument("--steps_per_log", type=int)
     parser.add_argument("--steps_per_save", type=int)
     parser.add_argument("--seed", type=int)
+    parser.add_argument("--resume_from_checkpoint", type=int, default=0)
 
     return parser
 
-def conver_data(raw_data, stack_frames, lz4_compress, frame_size):
+def convert_data(raw_data, stack_frames, lz4_compress, frame_size):
     data = []
 
     frame_stack = collections.deque(maxlen=stack_frames)
@@ -154,11 +155,11 @@ def main():
     data_dir = pathlib.Path(args.data_dir)
     with open(data_dir / "train_data.pkl", "rb") as file:
         train_data = pickle.load(file)
-    train_data = conver_data(train_data, args.stack_frames, args.lz4_compress, args.frame_size)
+    train_data = convert_data(train_data, args.stack_frames, args.lz4_compress, args.frame_size)
 
     with open(data_dir / "eval_data.pkl", "rb") as file:
         eval_data = pickle.load(file)
-    eval_data = conver_data(eval_data, args.stack_frames, args.lz4_compress, args.frame_size)
+    eval_data = convert_data(eval_data, args.stack_frames, args.lz4_compress, args.frame_size)
 
     train_dataset = FEInvDataset(train_data)
     eval_dataset = FEInvDataset(eval_data)
@@ -172,9 +173,15 @@ def main():
 
     util.fix_random_seed(args.seed)
 
-    feature_extractor = FeatureExtrator((args.stack_frames, *args.frame_size))
+    feature_extractor = FeatureExtractor((args.stack_frames, *args.frame_size))
     feature_size = feature_extractor.output_size
     inverse_model = InverseModel(feature_size * 2, 12)
+
+    if args.resume_from_checkpoint:
+        checkpoint_dir = output_dir / f"checkpoint-{args.resume_from_checkpoint}"
+        logger.info(f"Loading checkpoint from {checkpoint_dir}")
+        feature_extractor.load_state_dict(torch.load(checkpoint_dir / "feature_extractor.pt"))
+        inverse_model.load_state_dict(torch.load(checkpoint_dir / "inverse_model.pt"))
 
     feature_extractor.to(args.device)
     inverse_model.to(args.device)
@@ -186,8 +193,11 @@ def main():
         args.learning_rate
     )
 
+    if args.resume_from_checkpoint:
+        optimizer.load_state_dict(torch.load(checkpoint_dir / "training_state.pt"))
+
     train_losses = []
-    step_count = 0
+    step_count = args.resume_from_checkpoint
 
     logger.info("***** Start training *****")
     for epoch in range(args.num_epochs):
