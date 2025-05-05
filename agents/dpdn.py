@@ -183,8 +183,7 @@ class DPDNTest:
         self.skip_frames = 4
         sigma0 = 0.5
 
-        import util
-        util.fix_random_seed(10000)
+        util.fix_random_seed(8)
 
         self.online_network = DPDNNetwork(self.state_shape, num_actions, sigma0)
         self.online_network.load_state_dict(
